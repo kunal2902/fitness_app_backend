@@ -9,6 +9,10 @@ import {
   notFoundHandler,
 } from './middleware/error.middleware.js';
 import { globalLimiter } from './middleware/rateLimit.middleware.js';
+import {
+  ensureUploadDirs,
+  uploadsRoot,
+} from './middleware/upload.middleware.js';
 import routes from './routes/index.js';
 
 export function createApp(): Express {
@@ -18,7 +22,9 @@ export function createApp(): Express {
   // client address, which the rate limiter depends on.
   app.set('trust proxy', 1);
 
-  app.use(helmet());
+  // crossOriginResourcePolicy must be relaxed or the <img> request from the
+  // app is blocked when the API and the client are on different origins.
+  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.use(
     cors({
       origin: env.corsOrigins.includes('*') ? true : env.corsOrigins,
@@ -34,6 +40,22 @@ export function createApp(): Express {
   }
 
   app.use(globalLimiter);
+
+  // Uploaded avatars, served outside the API prefix so the client can load
+  // them straight into an <Image> with no auth header. Nothing here is
+  // secret; the filenames are random and unguessable.
+  ensureUploadDirs();
+  app.use(
+    env.uploads.publicPath,
+    express.static(uploadsRoot, {
+      maxAge: '7d',
+      // Never let a stored file be executed or interpreted as HTML.
+      setHeaders: (res) => {
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('Content-Disposition', 'inline');
+      },
+    }),
+  );
 
   app.use(env.apiPrefix, routes);
 

@@ -432,6 +432,133 @@ async function main() {
     );
   });
 
+  // -------------------------------------------------------------------------
+  group('Profile update validation');
+
+  const { updateProfileSchema } = await import(
+    '../src/validators/user.validator.js'
+  );
+
+  await check('a partial update is accepted', () => {
+    const r = updateProfileSchema.safeParse({ fullName: 'Kunal B' });
+    assert.ok(r.success, JSON.stringify(r.error?.issues));
+  });
+
+  await check('an empty update is rejected', () => {
+    assert.ok(!updateProfileSchema.safeParse({}).success);
+  });
+
+  await check('update normalises username and email', () => {
+    const r = updateProfileSchema.parse({
+      username: 'Iron_Kunal',
+      email: 'Kunal@Example.COM',
+    });
+    assert.equal(r.username, 'iron_kunal');
+    assert.equal(r.email, 'kunal@example.com');
+  });
+
+  await check('update rejects a malformed username', () => {
+    assert.ok(!updateProfileSchema.safeParse({ username: 'a b' }).success);
+    assert.ok(!updateProfileSchema.safeParse({ username: 'ab' }).success);
+    assert.ok(!updateProfileSchema.safeParse({ username: 'trail_' }).success);
+  });
+
+  await check('update rejects a malformed email', () => {
+    assert.ok(!updateProfileSchema.safeParse({ email: 'nope' }).success);
+  });
+
+  // -------------------------------------------------------------------------
+  group('Avatar magic-byte sniffing');
+
+  const { detectImageExtension } = await import(
+    '../src/middleware/upload.middleware.js'
+  );
+
+  await check('a real JPEG header is detected', () => {
+    const buf = Buffer.concat([
+      Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+      Buffer.alloc(16),
+    ]);
+    assert.equal(detectImageExtension(buf), 'jpg');
+  });
+
+  await check('a real PNG header is detected', () => {
+    const buf = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.alloc(16),
+    ]);
+    assert.equal(detectImageExtension(buf), 'png');
+  });
+
+  await check('a real WebP header is detected', () => {
+    const buf = Buffer.concat([
+      Buffer.from('RIFF', 'ascii'),
+      Buffer.alloc(4),
+      Buffer.from('WEBP', 'ascii'),
+      Buffer.alloc(16),
+    ]);
+    assert.equal(detectImageExtension(buf), 'webp');
+  });
+
+  await check('an executable renamed to .jpg is rejected', () => {
+    // MZ header — a Windows PE, not an image.
+    const buf = Buffer.concat([Buffer.from('MZ', 'ascii'), Buffer.alloc(32)]);
+    assert.equal(detectImageExtension(buf), null);
+  });
+
+  await check('an HTML payload is rejected', () => {
+    const buf = Buffer.from('<html><script>alert(1)</script></html>', 'ascii');
+    assert.equal(detectImageExtension(buf), null);
+  });
+
+  await check('a truncated file is rejected rather than guessed', () => {
+    assert.equal(detectImageExtension(Buffer.from([0xff, 0xd8])), null);
+  });
+
+  // -------------------------------------------------------------------------
+  group('Profile endpoints are guarded');
+
+  await check('GET /users/me without a token is 401', async () => {
+    const res = await call('GET', '/users/me');
+    assert.equal(res.status, 401);
+  });
+
+  await check('PATCH /users/me without a token is 401', async () => {
+    const res = await call('PATCH', '/users/me', { fullName: 'Hacker' });
+    assert.equal(res.status, 401);
+  });
+
+  await check('POST /users/me/avatar without a token is 401', async () => {
+    const res = await call('POST', '/users/me/avatar');
+    assert.equal(res.status, 401);
+  });
+
+  await check('DELETE /users/me/avatar without a token is 401', async () => {
+    const res = await call('DELETE', '/users/me/avatar');
+    assert.equal(res.status, 401);
+  });
+
+  await check('auth runs before validation on PATCH', async () => {
+    // A bad body from an anonymous caller must still be 401, not 422 —
+    // otherwise the endpoint leaks its schema to unauthenticated users.
+    const res = await call('PATCH', '/users/me', { username: '!!!' });
+    assert.equal(res.status, 401);
+  });
+
+  await check('a missing avatar file 404s instead of erroring', async () => {
+    const res = await fetch(
+      `http://127.0.0.1:${port}/uploads/avatars/does-not-exist.png`,
+    );
+    assert.equal(res.status, 404);
+  });
+
+  await check('path traversal on the uploads route is refused', async () => {
+    const res = await fetch(
+      `http://127.0.0.1:${port}/uploads/avatars/..%2f..%2f..%2fpackage.json`,
+    );
+    assert.ok(res.status >= 400, `expected a refusal, got ${res.status}`);
+  });
+
   server.close();
 
   console.log(`\n${passed} passed, ${failed} failed\n`);

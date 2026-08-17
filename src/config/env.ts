@@ -57,6 +57,15 @@ export const env = {
 
   bcryptRounds: optionalNumber('BCRYPT_ROUNDS', 12),
 
+  uploads: {
+    /// Where avatar files land. Relative paths resolve from the process cwd.
+    dir: process.env.UPLOAD_DIR ?? 'uploads',
+    /// Public path prefix the files are served under (outside the API prefix,
+    /// so the client can fetch them without an auth header).
+    publicPath: '/uploads',
+    maxAvatarBytes: optionalNumber('MAX_AVATAR_BYTES', 5 * 1024 * 1024),
+  },
+
   /** Comma-separated list, or `*` in development. */
   corsOrigins: (process.env.CORS_ORIGINS ?? '*')
     .split(',')
