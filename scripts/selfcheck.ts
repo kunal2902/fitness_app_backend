@@ -559,6 +559,233 @@ async function main() {
     assert.ok(res.status >= 400, `expected a refusal, got ${res.status}`);
   });
 
+  // -------------------------------------------------------------------------
+  group('Assistance endpoints are guarded');
+
+  const guarded: Array<[string, string]> = [
+    ['GET', '/professionals'],
+    ['GET', '/professionals/507f1f77bcf86cd799439011'],
+    ['POST', '/professionals/507f1f77bcf86cd799439011/conversation'],
+    ['GET', '/conversations'],
+    ['GET', '/conversations/507f1f77bcf86cd799439011/messages'],
+    ['POST', '/conversations/507f1f77bcf86cd799439011/messages'],
+    ['GET', '/calls/ice-servers'],
+    ['GET', '/calls/history'],
+    ['POST', '/devices'],
+  ];
+  for (const [method, path] of guarded) {
+    await check(`${method} ${path} without a token is 401`, async () => {
+      const res = await call(method, path, method === 'POST' ? {} : undefined);
+      assert.equal(res.status, 401, `got ${res.status}`);
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  group('ICE / TURN credentials');
+
+  const { buildIceServers, turnConfigured } = await import(
+    '../src/services/turn.service.js'
+  );
+
+  await check('STUN is always offered', () => {
+    const servers = buildIceServers('507f1f77bcf86cd799439011');
+    assert.ok(servers.length >= 1, 'no ICE servers at all');
+    assert.ok(
+      servers[0]?.urls.some((u: string) => u.startsWith('stun:')),
+      'no STUN url',
+    );
+  });
+
+  await check('no TURN credentials are issued when unconfigured', () => {
+    assert.equal(turnConfigured(), false);
+    const servers = buildIceServers('507f1f77bcf86cd799439011');
+    assert.ok(
+      servers.every((s) => s.credential === undefined),
+      'issued a credential with no TURN secret set',
+    );
+  });
+
+  await check('TURN credentials match what coturn will recompute', async () => {
+    const { deriveTurnCredential } = await import(
+      '../src/services/turn.service.js'
+    );
+    const crypto = await import('node:crypto');
+
+    const now = 1_700_000_000;
+    const result = deriveTurnCredential(
+      '507f1f77bcf86cd799439011',
+      'super-secret-value',
+      3600,
+      now,
+    );
+
+    // coturn's REST API: username is "<expiry>:<name>", password is the
+    // base64 HMAC-SHA1 of that username keyed with static-auth-secret.
+    assert.equal(result.username, `${now + 3600}:507f1f77bcf86cd799439011`);
+    assert.equal(result.expiresAt, now + 3600);
+    assert.equal(
+      result.credential,
+      crypto
+        .createHmac('sha1', 'super-secret-value')
+        .update(result.username)
+        .digest('base64'),
+    );
+  });
+
+  await check('a different secret produces a different credential', async () => {
+    const { deriveTurnCredential } = await import(
+      '../src/services/turn.service.js'
+    );
+    const a = deriveTurnCredential('u1', 'secret-a', 3600, 1_700_000_000);
+    const b = deriveTurnCredential('u1', 'secret-b', 3600, 1_700_000_000);
+    assert.notEqual(a.credential, b.credential);
+  });
+
+  await check('the credential expires in the future', async () => {
+    const { deriveTurnCredential } = await import(
+      '../src/services/turn.service.js'
+    );
+    const result = deriveTurnCredential('u1', 'secret', 43_200);
+    assert.ok(result.expiresAt > Math.floor(Date.now() / 1000));
+  });
+
+  // -------------------------------------------------------------------------
+  group('Chat and device validation');
+
+  const { sendMessageSchema, registerDeviceSchema, markReadSchema } =
+    await import('../src/validators/assistance.validator.js');
+
+  await check('an empty message is rejected', () => {
+    assert.ok(!sendMessageSchema.safeParse({ body: '   ' }).success);
+  });
+
+  await check('a 4000-character message is accepted', () => {
+    assert.ok(sendMessageSchema.safeParse({ body: 'a'.repeat(4000) }).success);
+  });
+
+  await check('a 4001-character message is rejected', () => {
+    assert.ok(!sendMessageSchema.safeParse({ body: 'a'.repeat(4001) }).success);
+  });
+
+  await check('markRead needs a message id', () => {
+    assert.ok(!markReadSchema.safeParse({}).success);
+    assert.ok(markReadSchema.safeParse({ messageId: 'abc' }).success);
+  });
+
+  await check('a valid FCM registration passes', () => {
+    const r = registerDeviceSchema.safeParse({
+      token: 'x'.repeat(40),
+      platform: 'android',
+      kind: 'fcm',
+    });
+    assert.ok(r.success, JSON.stringify(r.error?.issues));
+  });
+
+  await check('a VoIP token on Android is rejected', () => {
+    // APNs VoIP is iOS-only; accepting it would silently never ring.
+    const r = registerDeviceSchema.safeParse({
+      token: 'x'.repeat(40),
+      platform: 'android',
+      kind: 'apns_voip',
+    });
+    assert.ok(!r.success);
+  });
+
+  await check('a stub token is rejected', () => {
+    assert.ok(
+      !registerDeviceSchema.safeParse({
+        token: 'abc',
+        platform: 'ios',
+        kind: 'fcm',
+      }).success,
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  group('Call reject reasons');
+
+  const { normaliseRejectReason } = await import(
+    '../src/realtime/call.handlers.js'
+  );
+
+  await check('an unanswered call stays "missed", not "declined"', () => {
+    assert.equal(normaliseRejectReason('missed'), 'missed');
+  });
+
+  await check('busy survives', () => {
+    assert.equal(normaliseRejectReason('busy'), 'busy');
+  });
+
+  await check('an explicit decline is a decline', () => {
+    assert.equal(normaliseRejectReason('declined'), 'declined');
+  });
+
+  await check('anything unrecognised falls back to declined', () => {
+    for (const raw of [undefined, null, '', 'nonsense', 42, {}]) {
+      assert.equal(normaliseRejectReason(raw), 'declined');
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  group('Socket handshake');
+
+  const { createSocketServer } = await import('../src/realtime/socket.js');
+  const { io: ioClient } = await import('socket.io-client');
+
+  const socketServer = createSocketServer(server);
+  const socketUrl = `http://127.0.0.1:${port}`;
+
+  const tryConnect = (auth?: Record<string, unknown>) =>
+    new Promise<{ connected: boolean; error?: string }>((resolve) => {
+      const client = ioClient(socketUrl, {
+        auth,
+        transports: ['websocket'],
+        reconnection: false,
+        timeout: 4000,
+      });
+      const done = (result: { connected: boolean; error?: string }) => {
+        client.close();
+        resolve(result);
+      };
+      client.on('connect', () => done({ connected: true }));
+      client.on('connect_error', (err: Error) =>
+        done({ connected: false, error: err.message }),
+      );
+      setTimeout(() => done({ connected: false, error: 'timeout' }), 5000);
+    });
+
+  await check('a socket with no token is refused', async () => {
+    const result = await tryConnect();
+    assert.equal(result.connected, false);
+    assert.equal(result.error, 'UNAUTHORIZED');
+  });
+
+  await check('a socket with a garbage token is refused', async () => {
+    const result = await tryConnect({ token: 'not-a-jwt' });
+    assert.equal(result.connected, false);
+    assert.equal(result.error, 'UNAUTHORIZED');
+  });
+
+  await check('a foreign-signed token is refused', async () => {
+    const jwtLib = (await import('jsonwebtoken')).default;
+    const forged = jwtLib.sign(
+      { username: 'attacker', type: 'access' },
+      'a-different-secret',
+      { subject: '507f1f77bcf86cd799439011', issuer: 'fitness-app' },
+    );
+    const result = await tryConnect({ token: forged });
+    assert.equal(result.connected, false);
+    assert.equal(result.error, 'UNAUTHORIZED');
+  });
+
+  await check('the error message never explains why', async () => {
+    // "UNAUTHORIZED" and nothing else — no "expired" vs "unknown user",
+    // which would let someone enumerate valid tokens.
+    const result = await tryConnect({ token: 'expired.looking.token' });
+    assert.equal(result.error, 'UNAUTHORIZED');
+  });
+
+  await new Promise<void>((resolve) => socketServer.close(() => resolve()));
   server.close();
 
   console.log(`\n${passed} passed, ${failed} failed\n`);

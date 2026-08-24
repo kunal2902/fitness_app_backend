@@ -1,6 +1,12 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 
+import {
+  calls,
+  conversations,
+  devices,
+  professionals,
+} from './assistance.routes.js';
 import authRoutes from './auth.routes.js';
 import userRoutes from './user.routes.js';
 
@@ -26,8 +32,12 @@ router.get('/health', (_req, res) => {
 
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
+router.use('/professionals', professionals);
+router.use('/conversations', conversations);
+router.use('/calls', calls);
+router.use('/devices', devices);
 
-// Phase 2 mounts here:
+// Later phases mount here:
 // router.use('/workouts', workoutRoutes);
 // router.use('/community', communityRoutes);
 

@@ -28,6 +28,10 @@ export const PUSHUP_RANGES = ['lt_11', '11_20', '21_30', 'gt_30'] as const;
 export const SQUAT_RANGES = ['lt_21', '21_30', '31_40', 'gt_40'] as const;
 export const DIP_RANGES = ['lt_9', '9_15', '16_25', 'gt_25'] as const;
 
+/** Members book coaching; professionals provide it. */
+export const USER_ROLES = ['member', 'professional'] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
 export const FITNESS_LEVELS = [
   'newbie',
   'beginner',
@@ -73,7 +77,8 @@ export interface IUser {
   passwordHash: string;
   avatarUrl?: string | null;
   isEmailVerified: boolean;
-  fitnessProfile: IFitnessProfile;
+  role: UserRole;
+  fitnessProfile?: IFitnessProfile;
   lastLoginAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -153,7 +158,10 @@ const userSchema = new Schema<IUser, UserModelType, IUserMethods>(
     },
     avatarUrl: { type: String, default: null },
     isEmailVerified: { type: Boolean, default: false },
-    fitnessProfile: { type: fitnessProfileSchema, required: true },
+    role: { type: String, enum: USER_ROLES, default: 'member', index: true },
+    // Optional because a professional account is created by the seed
+    // script and never walks the member onboarding questionnaire.
+    fitnessProfile: { type: fitnessProfileSchema, required: false },
     lastLoginAt: { type: Date, default: null },
   },
   {
@@ -207,7 +215,9 @@ export interface PublicUser {
   email: string;
   avatarUrl: string | null;
   isEmailVerified: boolean;
-  fitnessProfile: IFitnessProfile;
+  role: UserRole;
+  /** Absent on professional accounts, which skip member onboarding. */
+  fitnessProfile?: IFitnessProfile;
   createdAt: Date;
   updatedAt: Date;
 }
