@@ -8,6 +8,8 @@ import {
   professionals,
 } from './assistance.routes.js';
 import authRoutes from './auth.routes.js';
+import { env } from '../config/env.js';
+import { foods, nutrition } from './nutrition.routes.js';
 import userRoutes from './user.routes.js';
 
 const router = Router();
@@ -25,6 +27,7 @@ router.get('/health', (_req, res) => {
     data: {
       status: 'ok',
       database: states[mongoose.connection.readyState] ?? 'unknown',
+      globalFoodSearch: env.foodDataCentral.apiKey ? 'enabled' : 'disabled',
       uptimeSeconds: Math.round(process.uptime()),
     },
   });
@@ -36,6 +39,8 @@ router.use('/professionals', professionals);
 router.use('/conversations', conversations);
 router.use('/calls', calls);
 router.use('/devices', devices);
+router.use('/foods', foods);
+router.use('/nutrition', nutrition);
 
 // Later phases mount here:
 // router.use('/workouts', workoutRoutes);

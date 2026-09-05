@@ -16,6 +16,11 @@ async function bootstrap(): Promise<void> {
     console.info(
       `[server] listening on http://localhost:${env.port}${env.apiPrefix} (${env.nodeEnv})`,
     );
+    console.info(
+      `[server] global food search ${
+        env.foodDataCentral.apiKey ? 'enabled' : 'disabled'
+      } (USDA FoodData Central)`,
+    );
     if (!turnConfigured()) {
       console.warn(
         '[server] no TURN configured (TURN_URLS + TURN_STATIC_AUTH_SECRET). ' +

@@ -30,6 +30,17 @@ export const env = {
   nodeEnv,
   isProduction: nodeEnv === 'production',
   isDevelopment: nodeEnv === 'development',
+  nutritionTargetPolicyApproval: process.env.NUTRITION_TARGET_POLICY_APPROVAL ?? '',
+
+  foodDataCentral: {
+    /** Server-side only. Blank keeps global fallback disabled. */
+    apiKey: process.env.FDC_API_KEY ?? '',
+    baseUrl: process.env.FDC_API_BASE_URL ?? 'https://api.nal.usda.gov/fdc/v1',
+    timeoutMs: Math.min(
+      Math.max(optionalNumber('FDC_TIMEOUT_MS', 4_000), 500),
+      15_000,
+    ),
+  },
 
   port: optionalNumber('PORT', 3000),
   apiPrefix: process.env.API_PREFIX ?? '/api/v1',

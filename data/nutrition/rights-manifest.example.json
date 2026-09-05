@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "sources": {
+    "ifct2017": {
+      "sourceName": "Indian Food Composition Tables 2017",
+      "sourceVersion": "2017",
+      "sourceUrl": "https://www.nin.res.in/",
+      "licence": "PENDING WRITTEN CONFIRMATION",
+      "approvedForCommercialRedistribution": false,
+      "approvedBy": null,
+      "approvedAt": null,
+      "evidenceUrl": null,
+      "notes": "Do not infer data rights from the licence of a third-party package."
+    },
+    "indb": {
+      "sourceName": "Indian Nutrient Databank",
+      "sourceVersion": "2024.11",
+      "sourceUrl": "https://www.anuvaad.org.in/indian-nutrient-databank/",
+      "licence": "PENDING WRITTEN CONFIRMATION",
+      "approvedForCommercialRedistribution": false,
+      "approvedBy": null,
+      "approvedAt": null,
+      "evidenceUrl": null,
+      "notes": "The article is CC BY 4.0; confirm the downloadable dataset's redistribution terms separately."
+    }
+  }
+}
+
