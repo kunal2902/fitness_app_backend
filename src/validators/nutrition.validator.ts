@@ -70,6 +70,22 @@ export const nutritionLogParamsSchema = z.object({
   id: objectIdSchema,
 });
 
+export const createSavedMealSchema = z.object({
+  name: z.string().trim().min(1, 'Enter a name for this meal').max(80),
+  sourceDate: diaryDateSchema,
+  sourceMealType: z.enum(MEAL_TYPES),
+});
+
+export const savedMealParamsSchema = z.object({
+  id: objectIdSchema,
+});
+
+export const useSavedMealSchema = z.object({
+  date: diaryDateSchema,
+  mealType: z.enum(MEAL_TYPES),
+  clientId: z.string().trim().min(1).max(64),
+});
+
 const targetFields = {
   kcal: z.number().finite().min(1_000).max(10_000),
   proteinG: z.number().finite().min(0).max(1_000),
@@ -94,6 +110,8 @@ export type NutritionDateQuery = z.infer<typeof nutritionDateQuerySchema>;
 export type NutritionLogItemInput = z.infer<typeof nutritionLogItemSchema>;
 export type CreateNutritionLogInput = z.infer<typeof createNutritionLogSchema>;
 export type UpdateNutritionLogInput = z.infer<typeof updateNutritionLogSchema>;
+export type CreateSavedMealInput = z.infer<typeof createSavedMealSchema>;
+export type UseSavedMealInput = z.infer<typeof useSavedMealSchema>;
 export type UpdateNutritionTargetInput = z.infer<
   typeof updateNutritionTargetSchema
 >;

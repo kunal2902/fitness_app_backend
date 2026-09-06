@@ -2,11 +2,15 @@ import { Router } from 'express';
 
 import {
   createNutritionLog,
+  createSavedMeal,
   deleteNutritionLog,
+  deleteSavedMeal,
   getFood,
   getNutritionSummary,
   getNutritionTargets,
   listNutritionLogs,
+  listSavedMeals,
+  logSavedMeal,
   searchFoods,
   updateNutritionLog,
   updateNutritionTargets,
@@ -17,12 +21,15 @@ import { requireAuth } from '../middleware/auth.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import {
   createNutritionLogSchema,
+  createSavedMealSchema,
   foodParamsSchema,
   foodSearchQuerySchema,
   nutritionDateQuerySchema,
   nutritionLogParamsSchema,
+  savedMealParamsSchema,
   updateNutritionLogSchema,
   updateNutritionTargetSchema,
+  useSavedMealSchema,
 } from '../validators/nutrition.validator.js';
 
 const foods = Router();
@@ -45,6 +52,19 @@ nutrition.delete(
   '/logs/:id',
   validate(nutritionLogParamsSchema, 'params'),
   deleteNutritionLog,
+);
+nutrition.get('/saved-meals', listSavedMeals);
+nutrition.post('/saved-meals', validate(createSavedMealSchema), createSavedMeal);
+nutrition.delete(
+  '/saved-meals/:id',
+  validate(savedMealParamsSchema, 'params'),
+  deleteSavedMeal,
+);
+nutrition.post(
+  '/saved-meals/:id/log',
+  validate(savedMealParamsSchema, 'params'),
+  validate(useSavedMealSchema),
+  logSavedMeal,
 );
 nutrition.get(
   '/summary',

@@ -48,6 +48,7 @@ async function main() {
     { Food },
     { FoodLog },
     { NutritionTarget },
+    { SavedMeal },
     { usdaFoodDataService },
     { transformUsdaFood },
   ] =
@@ -56,13 +57,19 @@ async function main() {
       import('../src/models/food.model.js'),
       import('../src/models/foodLog.model.js'),
       import('../src/models/nutritionTarget.model.js'),
+      import('../src/models/savedMeal.model.js'),
       import('../src/services/usda-food-data.service.js'),
       import('../src/nutrition/usda-food-data.js'),
     ]);
 
   await mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 5_000 });
   await mongoose.connection.dropDatabase();
-  await Promise.all([Food.syncIndexes(), FoodLog.syncIndexes(), NutritionTarget.syncIndexes()]);
+  await Promise.all([
+    Food.syncIndexes(),
+    FoodLog.syncIndexes(),
+    NutritionTarget.syncIndexes(),
+    SavedMeal.syncIndexes(),
+  ]);
 
   const food = await Food.create({
     externalId: 'ifct:TEST001',
@@ -133,6 +140,7 @@ async function main() {
 
   let token = '';
   let logId = '';
+  let savedMealId = '';
 
   console.log('\nNutrition API smoke\n');
 
@@ -277,6 +285,75 @@ async function main() {
     assert.equal(await FoodLog.countDocuments(), 1);
   });
 
+  await check('a whole diary meal can be saved once for reuse', async () => {
+    const response = await call(
+      'POST',
+      '/nutrition/saved-meals',
+      {
+        name: 'Training breakfast',
+        sourceDate: '2026-08-28',
+        sourceMealType: 'breakfast',
+      },
+      token,
+    );
+    assert.equal(response.status, 201, JSON.stringify(response.json));
+    savedMealId = response.json.data.meal.id;
+    assert.equal(response.json.data.meal.items.length, 1);
+    assert.equal(response.json.data.meal.items[0].grams, 225);
+    assert.equal(response.json.data.meal.totals.kcal, 787.5);
+    assert.equal(response.json.data.meal.defaultMealType, 'breakfast');
+
+    const duplicate = await call(
+      'POST',
+      '/nutrition/saved-meals',
+      {
+        name: '  training BREAKFAST ',
+        sourceDate: '2026-08-28',
+        sourceMealType: 'breakfast',
+      },
+      token,
+    );
+    assert.equal(duplicate.status, 409);
+    assert.equal(duplicate.json.code, 'SAVED_MEAL_NAME_TAKEN');
+
+    const listed = await call('GET', '/nutrition/saved-meals', undefined, token);
+    assert.equal(listed.status, 200);
+    assert.equal(listed.json.data.meals.length, 1);
+    assert.equal(listed.json.data.meals[0].id, savedMealId);
+  });
+
+  await check('a saved meal logs idempotently on another day and meal', async () => {
+    const body = {
+      date: '2026-08-29',
+      mealType: 'dinner',
+      clientId: 'saved-meal-use-1',
+    };
+    const first = await call(
+      'POST',
+      `/nutrition/saved-meals/${savedMealId}/log`,
+      body,
+      token,
+    );
+    assert.equal(first.status, 201, JSON.stringify(first.json));
+    assert.equal(first.json.data.log.date, '2026-08-29');
+    assert.equal(first.json.data.log.mealType, 'dinner');
+    assert.equal(first.json.data.log.items[0].snapshot.per100g.kcal, 350);
+
+    const retry = await call(
+      'POST',
+      `/nutrition/saved-meals/${savedMealId}/log`,
+      body,
+      token,
+    );
+    assert.equal(retry.status, 200);
+    assert.equal(retry.json.data.duplicate, true);
+    assert.equal(retry.json.data.log.id, first.json.data.log.id);
+    assert.equal(await FoodLog.countDocuments(), 2);
+
+    const listed = await call('GET', '/nutrition/saved-meals', undefined, token);
+    assert.equal(listed.json.data.meals[0].useCount, 1);
+  });
+
   await check('inconsistent serving grams are rejected', async () => {
     const response = await call(
       'POST',
@@ -304,6 +381,22 @@ async function main() {
     assert.equal(response.status, 200);
     assert.equal(response.json.data.summary.totals.kcal, 787.5);
     assert.equal(response.json.data.summary.meals[0].mealType, 'breakfast');
+  });
+
+  await check('saved meals keep their reviewed nutrition after catalogue edits', async () => {
+    const response = await call(
+      'POST',
+      `/nutrition/saved-meals/${savedMealId}/log`,
+      {
+        date: '2026-08-30',
+        mealType: 'breakfast',
+        clientId: 'saved-meal-use-after-catalogue-edit',
+      },
+      token,
+    );
+    assert.equal(response.status, 201, JSON.stringify(response.json));
+    assert.equal(response.json.data.log.items[0].snapshot.per100g.kcal, 350);
+    assert.equal(response.json.data.log.items[0].macros.kcal, 787.5);
   });
 
   await check('log edits stay scoped and preserve untouched snapshots', async () => {
@@ -368,6 +461,44 @@ async function main() {
     assert.deepEqual(logs.json.data.logs, []);
     assert.equal(targets.json.data.target, null);
     assert.equal(summary.json.data.summary.totals.kcal, 0);
+  });
+
+  await check('saved meals are private to their owner', async () => {
+    const listed = await call('GET', '/nutrition/saved-meals', undefined, secondToken);
+    assert.equal(listed.status, 200);
+    assert.deepEqual(listed.json.data.meals, []);
+
+    const used = await call(
+      'POST',
+      `/nutrition/saved-meals/${savedMealId}/log`,
+      {
+        date: '2026-08-30',
+        mealType: 'lunch',
+        clientId: 'cross-account-use',
+      },
+      secondToken,
+    );
+    assert.equal(used.status, 404);
+    const deleted = await call(
+      'DELETE',
+      `/nutrition/saved-meals/${savedMealId}`,
+      undefined,
+      secondToken,
+    );
+    assert.equal(deleted.status, 404);
+  });
+
+  await check('deleting a template never changes logged history', async () => {
+    const before = await FoodLog.countDocuments();
+    const deleted = await call(
+      'DELETE',
+      `/nutrition/saved-meals/${savedMealId}`,
+      undefined,
+      token,
+    );
+    assert.equal(deleted.status, 200);
+    assert.equal(await SavedMeal.countDocuments(), 0);
+    assert.equal(await FoodLog.countDocuments(), before);
   });
 
   await check('other accounts cannot edit or delete a known log ID', async () => {

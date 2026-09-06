@@ -10,6 +10,7 @@ import {
 } from '../src/nutrition/nutrition-math.js';
 import { Food } from '../src/models/food.model.js';
 import { FoodLog, type PublicFoodLog } from '../src/models/foodLog.model.js';
+import { SavedMeal } from '../src/models/savedMeal.model.js';
 import { calculateFrecencyScore } from '../src/services/food.service.js';
 import { buildDailySummary } from '../src/services/nutrition.service.js';
 import {
@@ -19,6 +20,8 @@ import {
   foodSearchQuerySchema,
   updateNutritionLogSchema,
   updateNutritionTargetSchema,
+  createSavedMealSchema,
+  useSavedMealSchema,
 } from '../src/validators/nutrition.validator.js';
 
 let passed = 0;
@@ -228,6 +231,25 @@ async function main() {
     );
   });
 
+  await check('saved meals require a name, source slot and idempotent use', () => {
+    assert.ok(
+      createSavedMealSchema.safeParse({
+        name: 'Regular breakfast',
+        sourceDate: '2026-08-28',
+        sourceMealType: 'breakfast',
+      }).success,
+    );
+    assert.ok(!createSavedMealSchema.safeParse({ name: '' }).success);
+    assert.ok(
+      useSavedMealSchema.safeParse({
+        date: '2026-08-29',
+        mealType: 'lunch',
+        clientId: 'saved-use-1',
+      }).success,
+    );
+    assert.ok(!useSavedMealSchema.safeParse({}).success);
+  });
+
   group('Nutrition indexes');
 
   await check('food catalogue has a text-search index', () => {
@@ -253,6 +275,17 @@ async function main() {
     });
   });
 
+  await check('saved-meal names are unique per account', () => {
+    const indexes = SavedMeal.schema.indexes() as Array<
+      [Record<string, unknown>, Record<string, unknown>]
+    >;
+    const index = indexes.find(
+      ([, options]) => options.name === 'saved_meal_name_per_user',
+    );
+    assert.ok(index, 'missing per-user saved-meal name index');
+    assert.equal(index?.[1].unique, true);
+  });
+
   group('Nutrition routes are guarded');
 
   const app = createApp();
@@ -268,6 +301,10 @@ async function main() {
     ['POST', '/nutrition/logs', {}],
     ['PATCH', '/nutrition/logs/507f1f77bcf86cd799439011', {}],
     ['DELETE', '/nutrition/logs/507f1f77bcf86cd799439011'],
+    ['GET', '/nutrition/saved-meals'],
+    ['POST', '/nutrition/saved-meals', {}],
+    ['DELETE', '/nutrition/saved-meals/507f1f77bcf86cd799439011'],
+    ['POST', '/nutrition/saved-meals/507f1f77bcf86cd799439011/log', {}],
     ['GET', '/nutrition/summary?date=2026-08-28'],
     ['GET', '/nutrition/targets'],
     ['PATCH', '/nutrition/targets', {}],

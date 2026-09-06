@@ -6,15 +6,18 @@ import { recommendNutritionTarget, type NutritionRecommendationInput } from '../
 import { getValidated } from '../middleware/validate.middleware.js';
 import { foodService } from '../services/food.service.js';
 import { nutritionService } from '../services/nutrition.service.js';
+import { savedMealService } from '../services/savedMeal.service.js';
 import { ApiError } from '../utils/apiError.js';
 import { sendSuccess } from '../utils/apiResponse.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import type {
   CreateNutritionLogInput,
+  CreateSavedMealInput,
   FoodSearchQuery,
   NutritionDateQuery,
   UpdateNutritionLogInput,
   UpdateNutritionTargetInput,
+  UseSavedMealInput,
 } from '../validators/nutrition.validator.js';
 
 function requireUserId(req: Request): mongoose.Types.ObjectId {
@@ -94,6 +97,48 @@ export const deleteNutritionLog = asyncHandler(
     sendSuccess(res, { deleted: true }, 200, 'Food log deleted');
   },
 );
+
+/** `GET /nutrition/saved-meals` */
+export const listSavedMeals = asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireUserId(req);
+  const meals = await savedMealService.list(userId);
+  sendSuccess(res, { meals });
+});
+
+/** `POST /nutrition/saved-meals` — snapshot one whole diary meal slot. */
+export const createSavedMeal = asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireUserId(req);
+  const meal = await savedMealService.createFromDiary(
+    userId,
+    req.body as CreateSavedMealInput,
+  );
+  sendSuccess(res, { meal }, 201, 'Meal saved for reuse');
+});
+
+/** `DELETE /nutrition/saved-meals/:id` */
+export const deleteSavedMeal = asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireUserId(req);
+  const { id } = getValidated<{ id: string }>(req);
+  await savedMealService.delete(userId, id);
+  sendSuccess(res, { deleted: true }, 200, 'Saved meal deleted');
+});
+
+/** `POST /nutrition/saved-meals/:id/log` — reuse on any diary day/slot. */
+export const logSavedMeal = asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireUserId(req);
+  const { id } = getValidated<{ id: string }>(req);
+  const { log, isDuplicate } = await savedMealService.log(
+    userId,
+    id,
+    req.body as UseSavedMealInput,
+  );
+  sendSuccess(
+    res,
+    { log, duplicate: isDuplicate },
+    isDuplicate ? 200 : 201,
+    isDuplicate ? 'Saved meal already added' : 'Saved meal added to diary',
+  );
+});
 
 /** `GET /nutrition/summary?date=YYYY-MM-DD` */
 export const getNutritionSummary = asyncHandler(

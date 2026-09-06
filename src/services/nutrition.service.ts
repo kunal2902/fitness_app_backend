@@ -143,6 +143,43 @@ function duplicateKey(error: unknown): boolean {
   );
 }
 
+type ResolvedLogInput = Pick<
+  CreateNutritionLogInput,
+  'date' | 'mealType' | 'clientId' | 'notes'
+>;
+
+async function findDuplicateLog(
+  userId: mongoose.Types.ObjectId,
+  clientId: string | undefined,
+): Promise<FoodLogDocument | null> {
+  return clientId ? FoodLog.findOne({ userId, clientId }) : null;
+}
+
+async function createResolvedLog(
+  userId: mongoose.Types.ObjectId,
+  input: ResolvedLogInput,
+  items: IFoodLogItem[],
+): Promise<{ log: PublicFoodLog; isDuplicate: boolean }> {
+  let log: FoodLogDocument;
+  try {
+    log = await FoodLog.create({
+      userId,
+      date: input.date,
+      mealType: input.mealType,
+      items,
+      clientId: input.clientId ?? null,
+      notes: input.notes ?? null,
+    });
+  } catch (error) {
+    if (duplicateKey(error) && input.clientId) {
+      const raced = await FoodLog.findOne({ userId, clientId: input.clientId });
+      if (raced) return { log: toPublicFoodLog(raced), isDuplicate: true };
+    }
+    throw error;
+  }
+  return { log: toPublicFoodLog(log), isDuplicate: false };
+}
+
 export interface MealSummary {
   mealType: MealType;
   totals: MacroTotals;
@@ -180,30 +217,26 @@ export const nutritionService = {
     userId: mongoose.Types.ObjectId,
     input: CreateNutritionLogInput,
   ): Promise<{ log: PublicFoodLog; isDuplicate: boolean }> {
-    if (input.clientId) {
-      const existing = await FoodLog.findOne({ userId, clientId: input.clientId });
-      if (existing) return { log: toPublicFoodLog(existing), isDuplicate: true };
-    }
+    const existing = await findDuplicateLog(userId, input.clientId);
+    if (existing) return { log: toPublicFoodLog(existing), isDuplicate: true };
 
     const items = await resolveItems(input.items);
-    let log: FoodLogDocument;
-    try {
-      log = await FoodLog.create({
-        userId,
-        date: input.date,
-        mealType: input.mealType,
-        items,
-        clientId: input.clientId ?? null,
-        notes: input.notes ?? null,
-      });
-    } catch (error) {
-      if (duplicateKey(error) && input.clientId) {
-        const raced = await FoodLog.findOne({ userId, clientId: input.clientId });
-        if (raced) return { log: toPublicFoodLog(raced), isDuplicate: true };
-      }
-      throw error;
-    }
-    return { log: toPublicFoodLog(log), isDuplicate: false };
+    return createResolvedLog(userId, input, items);
+  },
+
+  /**
+   * Creates a normal diary log from snapshots already owned by the server.
+   * This is intentionally not exposed to request payloads: it lets reusable
+   * meals preserve the nutrition the member reviewed when saving the template,
+   * even if the source catalogue is later corrected or removed.
+   */
+  async createLogFromServerSnapshot(
+    userId: mongoose.Types.ObjectId,
+    input: ResolvedLogInput & { items: IFoodLogItem[] },
+  ): Promise<{ log: PublicFoodLog; isDuplicate: boolean }> {
+    const existing = await findDuplicateLog(userId, input.clientId);
+    if (existing) return { log: toPublicFoodLog(existing), isDuplicate: true };
+    return createResolvedLog(userId, input, input.items);
   },
 
   async updateLog(

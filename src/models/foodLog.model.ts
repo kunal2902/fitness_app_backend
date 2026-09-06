@@ -57,7 +57,7 @@ const foodSnapshotSchema = new Schema<IFoodSnapshot>(
   { _id: false },
 );
 
-const foodLogItemSchema = new Schema<IFoodLogItem>(
+export const foodLogItemSchema = new Schema<IFoodLogItem>(
   {
     foodId: { type: Schema.Types.ObjectId, ref: 'Food', required: true },
     grams: { type: Number, required: true, min: 0.01, max: 10_000 },
@@ -136,30 +136,34 @@ export interface PublicFoodLog {
   updatedAt: string;
 }
 
+export function toPublicFoodLogItem(item: IFoodLogItem): PublicFoodLogItem {
+  return {
+    foodId: item.foodId.toString(),
+    grams: item.grams,
+    quantity: item.quantity,
+    unitLabel: item.unitLabel,
+    snapshot: {
+      externalId: item.snapshot.externalId,
+      name: item.snapshot.name,
+      per100g: {
+        kcal: item.snapshot.per100g.kcal,
+        proteinG: item.snapshot.per100g.proteinG,
+        carbsG: item.snapshot.per100g.carbsG,
+        fatG: item.snapshot.per100g.fatG,
+      },
+      source: item.snapshot.source,
+      sourceVersion: item.snapshot.sourceVersion,
+    },
+    macros: macrosForGrams(item.snapshot.per100g, item.grams),
+  };
+}
+
 export function toPublicFoodLog(log: FoodLogDocument): PublicFoodLog {
   return {
     id: log._id.toString(),
     date: log.date,
     mealType: log.mealType,
-    items: log.items.map((item) => ({
-      foodId: item.foodId.toString(),
-      grams: item.grams,
-      quantity: item.quantity,
-      unitLabel: item.unitLabel,
-      snapshot: {
-        externalId: item.snapshot.externalId,
-        name: item.snapshot.name,
-        per100g: {
-          kcal: item.snapshot.per100g.kcal,
-          proteinG: item.snapshot.per100g.proteinG,
-          carbsG: item.snapshot.per100g.carbsG,
-          fatG: item.snapshot.per100g.fatG,
-        },
-        source: item.snapshot.source,
-        sourceVersion: item.snapshot.sourceVersion,
-      },
-      macros: macrosForGrams(item.snapshot.per100g, item.grams),
-    })),
+    items: log.items.map(toPublicFoodLogItem),
     clientId: log.clientId ?? null,
     notes: log.notes ?? null,
     createdAt: log.createdAt.toISOString(),
