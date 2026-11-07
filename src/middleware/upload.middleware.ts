@@ -10,9 +10,11 @@ import { ApiError } from '../utils/apiError.js';
 /** Absolute path to the uploads root, created on first use. */
 export const uploadsRoot = path.resolve(process.cwd(), env.uploads.dir);
 export const avatarsDir = path.join(uploadsRoot, 'avatars');
+export const routeThumbnailsDir = path.join(uploadsRoot, 'tracking');
 
 export function ensureUploadDirs(): void {
   fs.mkdirSync(avatarsDir, { recursive: true });
+  fs.mkdirSync(routeThumbnailsDir, { recursive: true });
 }
 
 const ALLOWED_MIME = new Set([

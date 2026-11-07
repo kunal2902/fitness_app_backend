@@ -1,0 +1,6 @@
+# Source datasets and generated release assets are deliberately local until
+# their commercial redistribution rights have been approved and documented.
+raw/
+generated/
+rights-manifest.local.json
+serving-curation.local.json

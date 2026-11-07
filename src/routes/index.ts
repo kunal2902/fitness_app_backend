@@ -10,6 +10,7 @@ import {
 import authRoutes from './auth.routes.js';
 import { env } from '../config/env.js';
 import { foods, nutrition } from './nutrition.routes.js';
+import { activities, health } from './tracking.routes.js';
 import userRoutes from './user.routes.js';
 
 const router = Router();
@@ -41,6 +42,8 @@ router.use('/calls', calls);
 router.use('/devices', devices);
 router.use('/foods', foods);
 router.use('/nutrition', nutrition);
+router.use('/activities', activities);
+router.use('/health', health);
 
 // Later phases mount here:
 // router.use('/workouts', workoutRoutes);
