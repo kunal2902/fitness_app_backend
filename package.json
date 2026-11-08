@@ -24,6 +24,7 @@
     "smoke:tracking": "tsx scripts/tracking-smoke.ts",
     "smoke:training-catalogue": "tsx scripts/training-catalogue-smoke.ts",
     "smoke:training-discovery": "tsx scripts/training-discovery-smoke.ts",
+    "smoke:realtime": "tsx scripts/realtime-smoke.ts",
     "backfill:tracking-thumbnails": "tsx scripts/backfill-route-thumbnails.ts",
     "test": "npm run typecheck && npm run selfcheck && npm run selfcheck:foods && npm run selfcheck:nutrition && npm run selfcheck:targets && npm run selfcheck:http && npm run selfcheck:tracking && npm run selfcheck:training && npm run selfcheck:training-review",
     "seed:training": "tsx scripts/import-training-catalogue.ts",

@@ -34,6 +34,23 @@ export interface SocketSession {
 export type AppSocket = Socket;
 
 let ioInstance: Server | null = null;
+let sweeperTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Stops the sweeper and closes the server.
+ *
+ * Closing the Socket.IO server alone leaves the ring-timeout interval
+ * running, which then queries a database the caller has already shut down.
+ */
+export async function closeSocketServer(): Promise<void> {
+  if (sweeperTimer) {
+    clearInterval(sweeperTimer);
+    sweeperTimer = null;
+  }
+  const io = ioInstance;
+  ioInstance = null;
+  if (io) await io.close();
+}
 
 /** The live server, for code outside a socket handler that needs to emit. */
 export function getIo(): Server {
@@ -63,6 +80,22 @@ export function createSocketServer(httpServer: HttpServer): Server {
   // -------------------------------------------------------------------------
 
   io.use(async (socket, next) => {
+    /**
+     * One rejection path, two audiences.
+     *
+     * The client only ever learns "UNAUTHORIZED" — an attacker probing
+     * tokens must not be told whether the signature, the expiry or the
+     * account was the problem. But a developer watching a device retry
+     * forever needs to know which it was, so the reason is logged here and
+     * never transmitted.
+     */
+    const deny = (reason: string): void => {
+      console.warn(
+        `[socket] handshake refused (${reason}) from ${socket.handshake.address}`,
+      );
+      next(new Error('UNAUTHORIZED'));
+    };
+
     try {
       const raw =
         (socket.handshake.auth as { token?: unknown } | undefined)?.token ??
@@ -74,14 +107,14 @@ export function createSocketServer(httpServer: HttpServer): Server {
           : '';
 
       if (!token) {
-        next(new Error('UNAUTHORIZED'));
+        deny(raw === undefined ? 'no token supplied' : 'token was not a string');
         return;
       }
 
       const payload = verifyAccessToken(token);
       const user = await User.findById(payload.sub);
       if (!user) {
-        next(new Error('UNAUTHORIZED'));
+        deny(`no account for subject ${payload.sub}`);
         return;
       }
 
@@ -94,9 +127,12 @@ export function createSocketServer(httpServer: HttpServer): Server {
       };
       Object.assign(socket.data, session);
       next();
-    } catch {
-      // Never leak why. An attacker probing tokens learns nothing.
-      next(new Error('UNAUTHORIZED'));
+    } catch (error) {
+      // Covers an expired or wrongly-signed token, a bad issuer, and a
+      // database hiccup during the account lookup. The last of those is
+      // transient, which is why the client retries with backoff rather than
+      // treating a refusal as permanent.
+      deny(error instanceof Error ? error.message : 'verification threw');
     }
   });
 
@@ -176,7 +212,10 @@ export function createSocketServer(httpServer: HttpServer): Server {
   });
 
   ioInstance = io;
-  startRingTimeoutSweeper(io);
+  // Held so it can actually be stopped. Dropping the handle left no way to
+  // shut the sweeper down, which a test harness notices as queries firing
+  // after its database has gone.
+  sweeperTimer = startRingTimeoutSweeper(io);
   return io;
 }
 
